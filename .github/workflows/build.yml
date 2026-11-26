@@ -1,0 +1,23 @@
+name: Compilar ESP-IDF Korvo-S31
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: espressif/idf:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configurar Target ESP32-S31 e Compilar
+        run: |
+          idf.py set-target esp32s31
+          idf.py build
+
+      - name: Guardar Firmware (.bin)
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-korvo-s31
+          path: build/*.bin
