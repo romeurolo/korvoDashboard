@@ -265,15 +265,28 @@ bsp_display_unlock();
 }
 }
 void app_main(void) {
-nvs_flash_init();
-// Inicializa Ecrã 800x480, Toque GT1151 e LVGL usando o BSP oficial ESP32-S31-Korvo-1
-bsp_display_start();
-bsp_display_backlight_on();
-criar_interface();
-// Inicializa Bluetooth NimBLE
-nimble_port_init();
-ble_hs_cfg.sync_cb = ble_on_sync;
-nimble_port_freertos_init(ble_host_task);
-// Inicia gravação periódica no gráfico
-xTaskCreate(tarefa_historico, "hist_task", 4096, NULL, 5, NULL);
+    nvs_flash_init();
+
+    // Inicializa Ecrã 800x480 e LVGL alocando o buffer na PSRAM de 16MB
+    bsp_display_cfg_t cfg = {
+        .lvgl_port_cfg = ESP_LVGL_PORT_INIT_CONFIG(),
+        .buffer_size = BSP_LCD_H_RES * 50,
+        .double_buffer = false,
+        .flags = {
+            .buff_dma = false,
+            .buff_spiram = true,
+        }
+    };
+    bsp_display_start_with_config(&cfg);
+    bsp_display_backlight_on();
+    criar_interface();
+
+    // Inicializa Bluetooth NimBLE
+    nimble_port_init();
+    ble_hs_cfg.sync_cb = ble_on_sync;
+    nimble_port_freertos_init(ble_host_task);
+
+    // Inicia gravação periódica no gráfico
+    xTaskCreate(tarefa_historico, "hist_task", 4096, NULL, 5, NULL);
 }
+
