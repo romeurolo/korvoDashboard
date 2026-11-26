@@ -61,7 +61,6 @@ static void atualizar_ui_sensor(int sensor_idx, float temp, float hum, float bat
 
 // --- DESCODIFICADOR BTHOME V2 (SHELLY H&T GEN3) ---
 static void processar_pacote_ble(const uint8_t *addr, const uint8_t *data, uint8_t len) {
-    // Procura Service Data UUID 0xFCD2 (BTHome) dentro do pacote BLE
     size_t pos = 0;
     while (pos + 2 < len) {
         uint8_t field_len = data[pos];
@@ -73,7 +72,7 @@ static void processar_pacote_ble(const uint8_t *addr, const uint8_t *data, uint8
             const uint8_t *bt = &data[pos + 4];
             size_t bt_len = field_len - 3;
 
-            if (bt_len < 2 || (bt & 0x01)) return; // Ignora se encriptado
+            if (bt_len < 2 || (bt[0] & 0x01)) return; // Ignora se encriptado
 
             float temp = NAN, hum = NAN, bat = NAN;
             size_t i = 1;
@@ -98,7 +97,7 @@ static void processar_pacote_ble(const uint8_t *addr, const uint8_t *data, uint8
 
             char mac_str[18];
             snprintf(mac_str, sizeof(mac_str), "%02X:%02X:%02X:%02X:%02X:%02X",
-                     addr[5], addr[4], addr[3], addr[2], addr[1], addr);
+                     addr[5], addr[4], addr[3], addr[2], addr[1], addr[0]);
 
             ESP_LOGI(TAG, "Shelly BTHome [%s] -> T:%.1f H:%.0f B:%.0f", mac_str, temp, hum, bat);
 
@@ -260,3 +259,21 @@ static void tarefa_historico(void *param) {
             lv_chart_set_next_value(grafico_temp, serie_sala, (lv_coord_t)ultima_temp_sala);
         }
         if (!isnan(ultima_temp_quarto)) {
+            lv_chart_set_next_value(grafico_temp, serie_quarto, (lv_coord_t)ultima_temp_quarto);
+        }
+bsp_display_unlock();
+}
+}
+void app_main(void) {
+nvs_flash_init();
+// Inicializa Ecrã 800x480, Toque GT1151 e LVGL usando o BSP oficial ESP32-S31-Korvo-1
+bsp_display_start();
+bsp_display_backlight_on();
+criar_interface();
+// Inicializa Bluetooth NimBLE
+nimble_port_init();
+ble_hs_cfg.sync_cb = ble_on_sync;
+nimble_port_freertos_init(ble_host_task);
+// Inicia gravação periódica no gráfico
+xTaskCreate(tarefa_historico, "hist_task", 4096, NULL, 5, NULL);
+}
