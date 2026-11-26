@@ -10,10 +10,54 @@ esp32:
     version: 6.1.0
     platform_version: 6.1.0
 
-# Bluetooth ativo para ler Shelly H&T Gen3 (BTHome) sem Wi-Fi
+# Bluetooth ativo para ler Shelly H&T Gen3 (BTHome v2 - UUID FCD2) sem Wi-Fi
 esp32_ble_tracker:
   scan_parameters:
     active: false
+  on_ble_service_data_advertise:
+    - service_uuid: FCD2
+      then:
+        - lambda: |-
+            std::string mac = x.address_str();
+            // Ignora pacotes encriptados (bit 0 do byte 0)
+            if (x.data.size() < 2 || (x.data & 0x01)) return;
+
+            float temp = NAN;
+            float hum = NAN;
+            float bat = NAN;
+
+            size_t i = 1;
+            while (i < x.data.size()) {
+              uint8_t obj_id = x.data[i++];
+              if (obj_id == 0x01 && i < x.data.size()) { // Bateria (%)
+                bat = x.data[i++];
+              } else if (obj_id == 0x02 && i + 1 < x.data.size()) { // Temperatura (0.01 C)
+                int16_t raw = (int16_t)(x.data[i] | (x.data[i + 1] << 8));
+                temp = raw * 0.01f;
+                i += 2;
+              } else if (obj_id == 0x03 && i + 1 < x.data.size()) { // Humidade (0.01 %)
+                uint16_t raw = (uint16_t)(x.data[i] | (x.data[i + 1] << 8));
+                hum = raw * 0.01f;
+                i += 2;
+              } else if (obj_id == 0x00 && i < x.data.size()) { // Packet ID
+                i += 1;
+              } else {
+                break;
+              }
+            }
+
+            // Atualiza Sensor 1: Sala (Substitua pelo MAC real do Shelly 1)
+            if (mac == "AA:BB:CC:DD:EE:01") {
+              if (!std::isnan(temp)) id(temp_sala).publish_state(temp);
+              if (!std::isnan(hum)) id(hum_sala).publish_state(hum);
+              if (!std::isnan(bat)) id(bat_sala).publish_state(bat);
+            }
+            // Atualiza Sensor 2: Quarto (Substitua pelo MAC real do Shelly 2)
+            else if (mac == "AA:BB:CC:DD:EE:02") {
+              if (!std::isnan(temp)) id(temp_quarto).publish_state(temp);
+              if (!std::isnan(hum)) id(hum_quarto).publish_state(hum);
+              if (!std::isnan(bat)) id(bat_quarto).publish_state(bat);
+            }
 
 # Barramento I2C para o controlador tátil GT1151 (GPIO50/51 no Korvo-1)
 i2c:
@@ -51,65 +95,92 @@ touchscreen:
     id: meu_toque
     display: meu_ecra
 
-# Relógio interno offline (ajustável no ecrã de Configuração)
-time:
-  - platform: homeassistant
-    id: relogio_interno
-    on_time:
-      # Grava um ponto no gráfico de histórico a cada 15 minutos
-      - seconds: 0
-        minutes: /15
-        then:
-          - lvgl.widget.update:
-              id: grafico_temp
-              series:
-                - id: serie_temp_sala
-                  add_value: !lambda 'return id(temp_sala).state;'
+# Temporizador interno offline (grava ponto no histórico a cada 15 minutos)
+interval:
+  - interval: 15min
+    then:
+      - if:
+          condition:
+            lambda: 'return !std::isnan(id(temp_sala).state);'
+          then:
+            - lvgl.widget.update:
+                id: grafico_temp
+                series:
+                  - id: serie_temp_sala
+                    add_value: !lambda 'return id(temp_sala).state;'
+      - if:
+          condition:
+            lambda: 'return !std::isnan(id(temp_quarto).state);'
+          then:
+            - lvgl.widget.update:
+                id: grafico_temp
+                series:
+                  - id: serie_temp_quarto
+                    add_value: !lambda 'return id(temp_quarto).state;'
 
-# --- SENSORES SHELLY H&T GEN3 (BTHome v2) ---
+# --- SENSORES INTERNOS (RECEBEM OS DADOS DO BLE ACIMA) ---
 sensor:
   # Sensor 1: Sala
-  - platform: bthome_ble
-    mac_address: "AA:BB:CC:DD:EE:01"
-    temperature:
-      name: "Temperatura Sala"
-      id: temp_sala
-      on_value:
-        - lvgl.label.update:
-            id: lbl_temp_sala
-            text: !lambda 'return str_sprintf("%.1f °C", x);'
-    humidity:
-      name: "Humidade Sala"
-      id: hum_sala
-      on_value:
-        - lvgl.label.update:
-            id: lbl_hum_sala
-            text: !lambda 'return str_sprintf("%.0f %%", x);'
-    battery_level:
-      name: "Bateria Sala"
-      id: bat_sala
-      on_value:
-        - lvgl.label.update:
-            id: lbl_bat_sala
-            text: !lambda 'return str_sprintf("Bat: %.0f%%", x);'
+  - platform: template
+    name: "Temperatura Sala"
+    id: temp_sala
+    unit_of_measurement: "°C"
+    accuracy_decimals: 1
+    on_value:
+      - lvgl.label.update:
+          id: lbl_temp_sala
+          text: !lambda 'return str_sprintf("%.1f °C", x);'
+
+  - platform: template
+    name: "Humidade Sala"
+    id: hum_sala
+    unit_of_measurement: "%"
+    accuracy_decimals: 0
+    on_value:
+      - lvgl.label.update:
+          id: lbl_hum_sala
+          text: !lambda 'return str_sprintf("%.0f %%", x);'
+
+  - platform: template
+    name: "Bateria Sala"
+    id: bat_sala
+    unit_of_measurement: "%"
+    accuracy_decimals: 0
+    on_value:
+      - lvgl.label.update:
+          id: lbl_bat_sala
+          text: !lambda 'return str_sprintf("Bat: %.0f%%", x);'
 
   # Sensor 2: Quarto
-  - platform: bthome_ble
-    mac_address: "AA:BB:CC:DD:EE:02"
-    temperature:
-      name: "Temperatura Quarto"
-      id: temp_quarto
-      on_value:
-        - lvgl.label.update:
-            id: lbl_temp_quarto
-            text: !lambda 'return str_sprintf("%.1f °C", x);'
-    humidity:
-      name: "Humidade Quarto"
-      id: hum_quarto
-      on_value:
-        - lvgl.label.update:
-            id: lbl_hum_quarto
-            text: !lambda 'return str_sprintf("%.0f %%", x);'
+  - platform: template
+    name: "Temperatura Quarto"
+    id: temp_quarto
+    unit_of_measurement: "°C"
+    accuracy_decimals: 1
+    on_value:
+      - lvgl.label.update:
+          id: lbl_temp_quarto
+          text: !lambda 'return str_sprintf("%.1f °C", x);'
+
+  - platform: template
+    name: "Humidade Quarto"
+    id: hum_quarto
+    unit_of_measurement: "%"
+    accuracy_decimals: 0
+    on_value:
+      - lvgl.label.update:
+          id: lbl_hum_quarto
+          text: !lambda 'return str_sprintf("%.0f %%", x);'
+
+  - platform: template
+    name: "Bateria Quarto"
+    id: bat_quarto
+    unit_of_measurement: "%"
+    accuracy_decimals: 0
+    on_value:
+      - lvgl.label.update:
+          id: lbl_bat_quarto
+          text: !lambda 'return str_sprintf("Bat: %.0f%%", x);'
 
 # --- INTERFACE GRÁFICA LVGL (3 PÁGINAS TÁTEIS) ---
 lvgl:
@@ -131,7 +202,6 @@ lvgl:
             text: "DASHBOARD SHELLY H&T"
             text_color: 0x38BDF8
             text_font: montserrat_24
-        # Botões de navegação no topo
         - button:
             x: 520
             y: 10
@@ -220,6 +290,12 @@ lvgl:
                   text: "-- %"
                   text_color: 0x2DD4BF
                   text_font: montserrat_36
+              - label:
+                  id: lbl_bat_quarto
+                  x: 20
+                  y: 310
+                  text: "Bat: --%"
+                  text_color: 0x94A3B8
 
     # PÁGINA 2: HISTÓRICO (GRÁFICO)
     - id: pag_historico
@@ -228,9 +304,9 @@ lvgl:
         - label:
             x: 20
             y: 15
-            text: "HISTÓRICO DE TEMPERATURA (24H)"
+            text: "HISTÓRICO TEMPERATURA (Azul: Sala | Verde: Quarto)"
             text_color: 0x38BDF8
-            text_font: montserrat_24
+            text_font: montserrat_20
         - button:
             x: 655
             y: 10
@@ -256,6 +332,9 @@ lvgl:
               - id: serie_temp_sala
                 color: 0x38BDF8
                 width: 3
+              - id: serie_temp_quarto
+                color: 0x2DD4BF
+                width: 3
 
     # PÁGINA 3: CONFIGURAÇÃO
     - id: pag_config
@@ -274,39 +353,3 @@ lvgl:
             height: 40
             on_click:
               - lvgl.page.show: pag_dashboard
-            widgets:
-              - label:
-                  text: "Voltar"
-                  align: CENTER
-        - obj:
-            x: 20
-            y: 75
-            width: 760
-            height: 380
-            bg_color: 0x1E293B
-            radius: 16
-            widgets:
-              - label:
-                  x: 20
-                  y: 20
-                  text: "Brilho do Ecrã"
-                  text_color: 0xFFFFFF
-              - slider:
-                  x: 20
-                  y: 60
-                  width: 300
-                  min_value: 10
-                  max_value: 100
-                  value: 80
-              - button:
-                  x: 20
-                  y: 140
-                  width: 260
-                  height: 50
-                  bg_color: 0xDC2626
-                  on_click:
-                    - lvgl.chart.clear: grafico_temp
-                  widgets:
-                    - label:
-                        text: "Limpar Gráfico Histórico"
-                        align: CENTER
