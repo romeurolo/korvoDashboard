@@ -16,7 +16,8 @@ jobs:
           . $IDF_PATH/export.sh
           idf.py set-target esp32s31 || (cat build/log/idf_py_stderr_output_* && exit 1)
           idf.py build || (cat build/log/idf_py_stderr_output_* && exit 1)
-          esptool.py --chip esp32s31 merge_bin -o build/firmware_completo.bin @build/flash_args
+          cd build
+          esptool --chip esp32s31 merge-bin -o firmware_completo.bin @flash_args
 
       - name: Guardar Firmware (.bin)
         uses: actions/upload-artifact@v4
