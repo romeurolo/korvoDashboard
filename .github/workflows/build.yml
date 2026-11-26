@@ -1,12 +1,7 @@
 name: Compilar ESP-IDF Korvo-S31
 on:
   push:
-    paths-ignore:
-      - 'firmware/**'
   workflow_dispatch:
-
-permissions:
-  contents: write
 
 jobs:
   build:
@@ -21,16 +16,11 @@ jobs:
           . $IDF_PATH/export.sh
           idf.py set-target esp32s31 || (cat build/log/idf_py_stderr_output_* && exit 1)
           idf.py build || (cat build/log/idf_py_stderr_output_* && exit 1)
-          mkdir -p firmware
-          cp build/bootloader/bootloader.bin firmware/bootloader.bin
-          cp build/partition_table/partition-table.bin firmware/partition-table.bin
-          cp build/korvo_shelly_gateway.bin firmware/korvo_shelly_gateway.bin
+          cd build
+          esptool --chip esp32s31 merge-bin -o firmware_unico.bin --pad-to-size 2MB @flash_args
 
-      - name: Fazer Commit dos .bin no Repositório
-        run: |
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          git config --global user.name "GitHub Actions"
-          git config --global user.email "actions@github.com"
-          git add firmware/
-          git commit -m "Atualizar binarios do firmware" || exit 0
-          git push
+      - name: Guardar Firmware (.zip)
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-korvo-s31
+          path: build/firmware_unico.bin
