@@ -1,0 +1,312 @@
+esphome:
+  name: korvo-shelly-gateway
+  friendly_name: Gateway Shelly H&T
+
+esp32:
+  board: esp32-s31-devkitc-1
+  variant: esp32s31
+  framework:
+    type: esp-idf
+    version: 6.1.0
+    platform_version: 6.1.0
+
+# Bluetooth ativo para ler Shelly H&T Gen3 (BTHome) sem Wi-Fi
+esp32_ble_tracker:
+  scan_parameters:
+    active: false
+
+# Barramento I2C para o controlador tátil GT1151 (GPIO50/51 no Korvo-1)
+i2c:
+  sda: GPIO50
+  scl: GPIO51
+  scan: true
+
+# Ecrã 4.3" RGB Paralelo (800x480 - Subboard SUB3)
+display:
+  - platform: rpi_dpi_rgb
+    id: meu_ecra
+    color_order: RGB
+    dimensions:
+      width: 800
+      height: 480
+    pclk_pin: GPIO46
+    vsync_pin: GPIO45
+    hsync_pin: GPIO44
+    de_pin: GPIO43
+    data_pins:
+      red: [GPIO19, GPIO26, GPIO27, GPIO28, GPIO30]
+      green: [GPIO13, GPIO14, GPIO15, GPIO16, GPIO17, GPIO18]
+      blue: [GPIO9, GPIO10, GPIO11, GPIO12, GPIO21]
+    pclk_frequency: 16MHz
+    hsync_back_porch: 40
+    hsync_front_porch: 40
+    hsync_pulse_width: 48
+    vsync_back_porch: 32
+    vsync_front_porch: 13
+    vsync_pulse_width: 3
+
+# Controlador Tátil GT1151
+touchscreen:
+  - platform: gt911
+    id: meu_toque
+    display: meu_ecra
+
+# Relógio interno offline (ajustável no ecrã de Configuração)
+time:
+  - platform: homeassistant
+    id: relogio_interno
+    on_time:
+      # Grava um ponto no gráfico de histórico a cada 15 minutos
+      - seconds: 0
+        minutes: /15
+        then:
+          - lvgl.widget.update:
+              id: grafico_temp
+              series:
+                - id: serie_temp_sala
+                  add_value: !lambda 'return id(temp_sala).state;'
+
+# --- SENSORES SHELLY H&T GEN3 (BTHome v2) ---
+sensor:
+  # Sensor 1: Sala
+  - platform: bthome_ble
+    mac_address: "AA:BB:CC:DD:EE:01"
+    temperature:
+      name: "Temperatura Sala"
+      id: temp_sala
+      on_value:
+        - lvgl.label.update:
+            id: lbl_temp_sala
+            text: !lambda 'return str_sprintf("%.1f °C", x);'
+    humidity:
+      name: "Humidade Sala"
+      id: hum_sala
+      on_value:
+        - lvgl.label.update:
+            id: lbl_hum_sala
+            text: !lambda 'return str_sprintf("%.0f %%", x);'
+    battery_level:
+      name: "Bateria Sala"
+      id: bat_sala
+      on_value:
+        - lvgl.label.update:
+            id: lbl_bat_sala
+            text: !lambda 'return str_sprintf("Bat: %.0f%%", x);'
+
+  # Sensor 2: Quarto
+  - platform: bthome_ble
+    mac_address: "AA:BB:CC:DD:EE:02"
+    temperature:
+      name: "Temperatura Quarto"
+      id: temp_quarto
+      on_value:
+        - lvgl.label.update:
+            id: lbl_temp_quarto
+            text: !lambda 'return str_sprintf("%.1f °C", x);'
+    humidity:
+      name: "Humidade Quarto"
+      id: hum_quarto
+      on_value:
+        - lvgl.label.update:
+            id: lbl_hum_quarto
+            text: !lambda 'return str_sprintf("%.0f %%", x);'
+
+# --- INTERFACE GRÁFICA LVGL (3 PÁGINAS TÁTEIS) ---
+lvgl:
+  displays:
+    - meu_ecra
+  touchscreens:
+    - meu_toque
+  theme:
+    label:
+      text_font: montserrat_20
+  pages:
+    # PÁGINA 1: DASHBOARD
+    - id: pag_dashboard
+      bg_color: 0x0F172A
+      widgets:
+        - label:
+            x: 20
+            y: 15
+            text: "DASHBOARD SHELLY H&T"
+            text_color: 0x38BDF8
+            text_font: montserrat_24
+        # Botões de navegação no topo
+        - button:
+            x: 520
+            y: 10
+            width: 120
+            height: 40
+            on_click:
+              - lvgl.page.show: pag_historico
+            widgets:
+              - label:
+                  text: "Histórico"
+                  align: CENTER
+        - button:
+            x: 655
+            y: 10
+            width: 125
+            height: 40
+            on_click:
+              - lvgl.page.show: pag_config
+            widgets:
+              - label:
+                  text: "Configurar"
+                  align: CENTER
+
+        # Cartão 1: Sala
+        - obj:
+            x: 20
+            y: 75
+            width: 370
+            height: 380
+            bg_color: 0x1E293B
+            radius: 16
+            widgets:
+              - label:
+                  x: 20
+                  y: 20
+                  text: "Sala de Estar"
+                  text_color: 0xF8FAFC
+                  text_font: montserrat_24
+              - label:
+                  id: lbl_temp_sala
+                  x: 20
+                  y: 90
+                  text: "--.- °C"
+                  text_color: 0x38BDF8
+                  text_font: montserrat_48
+              - label:
+                  id: lbl_hum_sala
+                  x: 20
+                  y: 170
+                  text: "-- %"
+                  text_color: 0x2DD4BF
+                  text_font: montserrat_36
+              - label:
+                  id: lbl_bat_sala
+                  x: 20
+                  y: 310
+                  text: "Bat: --%"
+                  text_color: 0x94A3B8
+
+        # Cartão 2: Quarto
+        - obj:
+            x: 410
+            y: 75
+            width: 370
+            height: 380
+            bg_color: 0x1E293B
+            radius: 16
+            widgets:
+              - label:
+                  x: 20
+                  y: 20
+                  text: "Quarto"
+                  text_color: 0xF8FAFC
+                  text_font: montserrat_24
+              - label:
+                  id: lbl_temp_quarto
+                  x: 20
+                  y: 90
+                  text: "--.- °C"
+                  text_color: 0x38BDF8
+                  text_font: montserrat_48
+              - label:
+                  id: lbl_hum_quarto
+                  x: 20
+                  y: 170
+                  text: "-- %"
+                  text_color: 0x2DD4BF
+                  text_font: montserrat_36
+
+    # PÁGINA 2: HISTÓRICO (GRÁFICO)
+    - id: pag_historico
+      bg_color: 0x0F172A
+      widgets:
+        - label:
+            x: 20
+            y: 15
+            text: "HISTÓRICO DE TEMPERATURA (24H)"
+            text_color: 0x38BDF8
+            text_font: montserrat_24
+        - button:
+            x: 655
+            y: 10
+            width: 125
+            height: 40
+            on_click:
+              - lvgl.page.show: pag_dashboard
+            widgets:
+              - label:
+                  text: "Voltar"
+                  align: CENTER
+        - chart:
+            id: grafico_temp
+            x: 20
+            y: 75
+            width: 760
+            height: 380
+            type: LINE
+            point_count: 96 # 96 pontos x 15 min = 24 horas na PSRAM
+            min_value: 0
+            max_value: 45
+            series:
+              - id: serie_temp_sala
+                color: 0x38BDF8
+                width: 3
+
+    # PÁGINA 3: CONFIGURAÇÃO
+    - id: pag_config
+      bg_color: 0x0F172A
+      widgets:
+        - label:
+            x: 20
+            y: 15
+            text: "CONFIGURAÇÃO DO SISTEMA"
+            text_color: 0x38BDF8
+            text_font: montserrat_24
+        - button:
+            x: 655
+            y: 10
+            width: 125
+            height: 40
+            on_click:
+              - lvgl.page.show: pag_dashboard
+            widgets:
+              - label:
+                  text: "Voltar"
+                  align: CENTER
+        - obj:
+            x: 20
+            y: 75
+            width: 760
+            height: 380
+            bg_color: 0x1E293B
+            radius: 16
+            widgets:
+              - label:
+                  x: 20
+                  y: 20
+                  text: "Brilho do Ecrã"
+                  text_color: 0xFFFFFF
+              - slider:
+                  x: 20
+                  y: 60
+                  width: 300
+                  min_value: 10
+                  max_value: 100
+                  value: 80
+              - button:
+                  x: 20
+                  y: 140
+                  width: 260
+                  height: 50
+                  bg_color: 0xDC2626
+                  on_click:
+                    - lvgl.chart.clear: grafico_temp
+                  widgets:
+                    - label:
+                        text: "Limpar Gráfico Histórico"
+                        align: CENTER
