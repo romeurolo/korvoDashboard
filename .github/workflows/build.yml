@@ -14,8 +14,8 @@ jobs:
       - name: Configurar Target ESP32-S31 e Compilar
         run: |
           . $IDF_PATH/export.sh
-          idf.py set-target esp32s31
-          idf.py build
+          idf.py set-target esp32s31 || (cat build/log/idf_py_stderr_output_* && exit 1)
+          idf.py build || (cat build/log/idf_py_stderr_output_* && exit 1)
           esptool.py --chip esp32s31 merge_bin -o build/firmware_completo.bin @build/flash_args
 
       - name: Guardar Firmware (.bin)
