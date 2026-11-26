@@ -1,0 +1,2 @@
+dependencies:
+  espressif/esp32_s31_korvo_1: "^1.0.0"
