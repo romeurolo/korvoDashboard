@@ -15,14 +15,29 @@
 #include "host/ble_hs.h"
 
 static const char *TAG = "SHELLY_GW";
+
 #define MAX_SLOTS 4
 #define MAX_DESCOBERTOS 12
+#define TAM_NOME 24
+#define TAM_MAC 20
+#define TAM_KEY 16
+#define TAM_BUF 64
+#define TAM_MSG 96
+#define TAM_OPCOES 512
+
+#define IDX_0 0
+#define IDX_1 1
+#define IDX_2 2
+#define IDX_3 3
+#define IDX_4 4
+#define IDX_5 5
+#define IDX_17 17
 
 static const uint32_t CORES_SLOTS[MAX_SLOTS] = {0x38BDF8, 0x2DD4BF, 0xFBBF24, 0xF472B6};
 
 typedef struct {
-    char nome;
-    char mac;
+    char nome[TAM_NOME];
+    char mac[TAM_MAC];
     float temp;
     float hum;
     float bat;
@@ -33,7 +48,7 @@ typedef struct {
 } SlotSensor;
 
 typedef struct {
-    char mac;
+    char mac[TAM_MAC];
     float ultima_temp;
     bool valido;
 } SensorDescoberto;
@@ -47,7 +62,7 @@ static button_handle_t btns[BSP_BUTTON_NUM];
 static volatile bool piscar_led_azul_req = false;
 
 // Estado de navegação
-static int divisao_hist_ativa = -1; // -1 = Todas as divisões; 0..3 = Divisão específica
+static int divisao_hist_ativa = -1;
 
 // Objetos LVGL globais
 static lv_obj_t *pag_dash, *pag_hist, *pag_conf;
@@ -66,7 +81,8 @@ static void carregar_config_nvs(void) {
     nvs_handle_t h;
     if (nvs_open("shelly_cfg", NVS_READONLY, &h) == ESP_OK) {
         for (int i = 0; i < MAX_SLOTS; i++) {
-            char key_mac, key_nome;
+            char key_mac[TAM_KEY];
+            char key_nome[TAM_KEY];
             snprintf(key_mac, sizeof(key_mac), "mac_%d", i);
             snprintf(key_nome, sizeof(key_nome), "nome_%d", i);
 
@@ -85,7 +101,7 @@ static void carregar_config_nvs(void) {
 static void guardar_mac_nvs(int slot_idx, const char *mac) {
     nvs_handle_t h;
     if (nvs_open("shelly_cfg", NVS_READWRITE, &h) == ESP_OK) {
-        char key;
+        char key[TAM_KEY];
         snprintf(key, sizeof(key), "mac_%d", slot_idx);
         nvs_set_str(h, key, mac);
         nvs_commit(h);
@@ -96,7 +112,7 @@ static void guardar_mac_nvs(int slot_idx, const char *mac) {
 static void guardar_nome_nvs(int slot_idx, const char *novo_nome) {
     nvs_handle_t h;
     if (nvs_open("shelly_cfg", NVS_READWRITE, &h) == ESP_OK) {
-        char key;
+        char key[TAM_KEY];
         snprintf(key, sizeof(key), "nome_%d", slot_idx);
         nvs_set_str(h, key, novo_nome);
         nvs_commit(h);
@@ -108,7 +124,7 @@ static void limpar_emparelhamentos_nvs(void) {
     nvs_handle_t h;
     if (nvs_open("shelly_cfg", NVS_READWRITE, &h) == ESP_OK) {
         for (int i = 0; i < MAX_SLOTS; i++) {
-            char key_mac;
+            char key_mac[TAM_KEY];
             snprintf(key_mac, sizeof(key_mac), "mac_%d", i);
             nvs_erase_key(h, key_mac);
         }
@@ -116,7 +132,7 @@ static void limpar_emparelhamentos_nvs(void) {
         nvs_close(h);
     }
     for (int i = 0; i < MAX_SLOTS; i++) {
-        slots[i].mac = '\0';
+        slots[i].mac[IDX_0] = '\0';
         slots[i].ativo = false;
         slots[i].temp = NAN;
         slots[i].hum = NAN;
@@ -142,7 +158,7 @@ static void tarefa_led_rgb(void *param) {
         if (piscar_led_azul_req && led_strip != NULL) {
             piscar_led_azul_req = false;
             for (int i = 0; i < BSP_LED_RGB_NUM; i++) {
-                led_strip_set_pixel(led_strip, i, 0, 40, 255); // Azul brilhante
+                led_strip_set_pixel(led_strip, i, 0, 40, 255);
             }
             led_strip_refresh(led_strip);
             vTaskDelay(pdMS_TO_TICKS(150));
@@ -174,9 +190,9 @@ static void atualizar_dropdown_divisoes(void) {
     int sel_atual = lv_dropdown_get_selected(dd_slot);
     if (sel_atual < 0 || sel_atual >= MAX_SLOTS) sel_atual = 0;
 
-    char opcoes = "";
+    char opcoes[TAM_OPCOES] = "";
     for (int i = 0; i < MAX_SLOTS; i++) {
-        char item;
+        char item[TAM_BUF];
         snprintf(item, sizeof(item), "%d: %s", i + 1, slots[i].nome);
         if (i > 0) strcat(opcoes, "\n");
         strcat(opcoes, item);
@@ -187,11 +203,11 @@ static void atualizar_dropdown_divisoes(void) {
 }
 
 static void atualizar_lista_dropdown_ble(void) {
-    char opcoes = "";
+    char opcoes[TAM_OPCOES] = "";
     int count = 0;
     for (int i = 0; i < MAX_DESCOBERTOS; i++) {
         if (descobertos[i].valido) {
-            char linha;
+            char linha[TAM_BUF];
             if (!isnan(descobertos[i].ultima_temp)) {
                 snprintf(linha, sizeof(linha), "%s (%.1f°C)", descobertos[i].mac, descobertos[i].ultima_temp);
             } else {
@@ -210,7 +226,7 @@ static void atualizar_lista_dropdown_ble(void) {
 }
 
 static void atualizar_cards_dashboard(void) {
-    char buf;
+    char buf[TAM_BUF];
     for (int i = 0; i < MAX_SLOTS; i++) {
         lv_label_set_text(lbl_nome_card[i], slots[i].nome);
         if (!slots[i].ativo) {
@@ -236,10 +252,9 @@ static void atualizar_cards_dashboard(void) {
     }
 }
 
-// Configura o gráfico de histórico para mostrar todas as divisões (-1) ou apenas uma (0..3)
 static void abrir_historico_divisao(int slot_idx) {
     divisao_hist_ativa = slot_idx;
-    char tit;
+    char tit[TAM_BUF];
     if (slot_idx == -1) {
         snprintf(tit, sizeof(tit), "HISTORICO 24H (Todas as Divisoes)");
         for (int i = 0; i < MAX_SLOTS; i++) {
@@ -263,13 +278,11 @@ static void botao_fisico_cb(void *arg, void *usr_data) {
     bsp_display_lock(0);
     lv_obj_t *ecra_atual = lv_scr_act();
 
-    // Se já está no histórico desta mesma divisão, volta ao Dashboard
     if (ecra_atual == pag_hist && divisao_hist_ativa == btn_idx) {
         divisao_hist_ativa = -1;
         atualizar_cards_dashboard();
         lv_scr_load(pag_dash);
     } else {
-        // Caso contrário, abre o histórico da divisão correspondente ao botão premido
         abrir_historico_divisao(btn_idx);
     }
     bsp_display_unlock();
@@ -281,13 +294,13 @@ static void processar_pacote_ble(const uint8_t *addr, const uint8_t *data, uint8
     while (pos + 2 < len) {
         uint8_t field_len = data[pos];
         if (field_len == 0 || pos + field_len >= len) break;
-        uint8_t field_type = data[pos + 1];
+        uint8_t field_type = data[pos + IDX_1];
 
-        if (field_type == 0x16 && field_len >= 5 && data[pos + 2] == 0xD2 && data[pos + 3] == 0xFC) {
-            const uint8_t *bt = &data[pos + 4];
+        if (field_type == 0x16 && field_len >= 5 && data[pos + IDX_2] == 0xD2 && data[pos + IDX_3] == 0xFC) {
+            const uint8_t *bt = &data[pos + IDX_4];
             size_t bt_len = field_len - 3;
 
-            if (bt_len < 2 || (bt & 0x01)) return;
+            if (bt_len < 2 || (bt[IDX_0] & 0x01)) return;
 
             float temp = NAN, hum = NAN, bat = NAN;
             uint8_t pkt_id = 0;
@@ -295,23 +308,23 @@ static void processar_pacote_ble(const uint8_t *addr, const uint8_t *data, uint8
             bool botao_premido = false;
 
             size_t i = 1;
-            while (i < bt_len) {
-                uint8_t obj_id = bt[i++];
+while (i < bt_len) {
+uint8_t obj_id = bt[i++];
 if (obj_id == 0x00 && i < bt_len) {
 pkt_id = bt[i++];
 has_pkt_id = true;
 } else if (obj_id == 0x01 && i < bt_len) {
 bat = (float)bt[i++];
 } else if (obj_id == 0x02 && i + 1 < bt_len) {
-int16_t raw = (int16_t)(bt[i] | (bt[i + 1] << 8));
+int16_t raw = (int16_t)(bt[i] | (bt[i + IDX_1] << 8));
 temp = raw * 0.01f;
 i += 2;
 } else if (obj_id == 0x45 && i + 1 < bt_len) {
-int16_t raw = (int16_t)(bt[i] | (bt[i + 1] << 8));
+int16_t raw = (int16_t)(bt[i] | (bt[i + IDX_1] << 8));
 temp = raw * 0.1f;
 i += 2;
 } else if (obj_id == 0x03 && i + 1 < bt_len) {
-uint16_t raw = (uint16_t)(bt[i] | (bt[i + 1] << 8));
+uint16_t raw = (uint16_t)(bt[i] | (bt[i + IDX_1] << 8));
 hum = raw * 0.01f;
 i += 2;
 } else if (obj_id == 0x2E && i < bt_len) {
@@ -323,9 +336,9 @@ if (btn_ev > 0) botao_premido = true;
 break;
 }
 }
-char mac_str;
+char mac_str[TAM_MAC];
 snprintf(mac_str, sizeof(mac_str), "%02X:%02X:%02X:%02X:%02X:%02X",
-addr, addr, addr, addr, addr, addr);
+addr[IDX_5], addr[IDX_4], addr[IDX_3], addr[IDX_2], addr[IDX_1], addr[IDX_0]);
 bsp_display_lock(0);
 bool novo_descoberto = false;
 int idx_desc = -1;
@@ -354,7 +367,6 @@ if (has_pkt_id) {
 slots[s].ultimo_pkt_id = pkt_id;
 slots[s].tem_pkt_id = true;
 }
-// Ativa o piscar do LED RGB onboard em azul
 piscar_led_azul_req = true;
 if (!isnan(temp)) slots[s].temp = temp;
 if (!isnan(hum)) slots[s].hum = hum;
@@ -422,7 +434,7 @@ slots[slot_idx].nome[sizeof(slots[slot_idx].nome) - 1] = '\0';
 guardar_nome_nvs(slot_idx, slots[slot_idx].nome);
 atualizar_dropdown_divisoes();
 atualizar_cards_dashboard();
-char msg;
+char msg[TAM_MSG];
 snprintf(msg, sizeof(msg), "Nome da Divisao %d guardado: %s", slot_idx + 1, slots[slot_idx].nome);
 lv_label_set_text(lbl_status_conf, msg);
 }
@@ -438,15 +450,15 @@ btn_guardar_nome_cb(NULL);
 }
 static void btn_emparelhar_cb(lv_event_t *e) {
 lv_obj_add_flag(teclado, LV_OBJ_FLAG_HIDDEN);
-char sel_str;
+char sel_str[TAM_BUF];
 lv_dropdown_get_selected_str(dd_descobertos, sel_str, sizeof(sel_str));
 if (strncmp(sel_str, "A procurar", 10) == 0) {
 lv_label_set_text(lbl_status_conf, "Nenhum sensor detetado ainda. Prima o botao do Shelly!");
 return;
 }
-char mac_escolhido;
-strncpy(mac_escolhido, sel_str, 17);
-mac_escolhido = '\0';
+char mac_escolhido[TAM_MAC];
+strncpy(mac_escolhido, sel_str, IDX_17);
+mac_escolhido[IDX_17] = '\0';
 int slot_idx = lv_dropdown_get_selected(dd_slot);
 if (slot_idx < 0 || slot_idx >= MAX_SLOTS) slot_idx = 0;
 strcpy(slots[slot_idx].mac, mac_escolhido);
@@ -462,7 +474,7 @@ slots[slot_idx].temp = descobertos[d].ultima_temp;
 }
 guardar_mac_nvs(slot_idx, mac_escolhido);
 atualizar_cards_dashboard();
-char msg;
+char msg[TAM_MSG];
 snprintf(msg, sizeof(msg), "Emparelhado %s -> %s!", mac_escolhido, slots[slot_idx].nome);
 lv_label_set_text(lbl_status_conf, msg);
 }
@@ -662,19 +674,15 @@ bsp_display_cfg_t cfg = {
 bsp_display_start_with_config(&cfg);
 bsp_display_backlight_on();
 criar_interface();
-// Inicializa os botões físicos da placa Korvo-1 via BSP oficial
 int btn_cnt = 0;
 if (bsp_iot_button_create(btns, &btn_cnt, BSP_BUTTON_NUM) == ESP_OK) {
 for (int i = 0; i < btn_cnt && i < MAX_SLOTS; i++) {
 iot_button_register_cb(btns[i], BUTTON_SINGLE_CLICK, NULL, botao_fisico_cb, (void *)(intptr_t)i);
 }
 }
-// Inicia tarefa do LED RGB onboard
 xTaskCreate(tarefa_led_rgb, "led_rgb_task", 2048, NULL, 4, NULL);
-// Inicia Bluetooth NimBLE
 nimble_port_init();
 ble_hs_cfg.sync_cb = ble_on_sync;
 nimble_port_freertos_init(ble_host_task);
-// Inicia gravação periódica no gráfico
 xTaskCreate(tarefa_historico, "hist_task", 4096, NULL, 5, NULL);
 }
