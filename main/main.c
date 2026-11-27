@@ -18,19 +18,17 @@ static const char *TAG = "SHELLY_GW";
 
 static const uint32_t CORES_SLOTS[MAX_SLOTS] = {0x38BDF8, 0x2DD4BF, 0xFBBF24, 0xF472B6};
 
-// Estrutura de cada divisão / slot (guardada na Flash NVS)
 typedef struct {
-    char nome;
-    char mac;
+    char nome[24];
+    char mac[18];
     float temp;
     float hum;
     float bat;
     bool ativo;
 } SlotSensor;
 
-// Estrutura de sensores descobertos via BLE
 typedef struct {
-    char mac;
+    char mac[18];
     float ultima_temp;
     bool valido;
 } SensorDescoberto;
@@ -47,7 +45,6 @@ static lv_obj_t *dd_descobertos, *dd_slot, *ta_nome_div, *teclado, *lbl_status_c
 
 // --- GESTÃO DE MEMÓRIA PERMANENTE (NVS FLASH) ---
 static void carregar_config_nvs(void) {
-    // Nomes padrão iniciais
     for (int i = 0; i < MAX_SLOTS; i++) {
         snprintf(slots[i].nome, sizeof(slots[i].nome), "Divisao %d", i + 1);
     }
@@ -55,7 +52,7 @@ static void carregar_config_nvs(void) {
     nvs_handle_t h;
     if (nvs_open("shelly_cfg", NVS_READONLY, &h) == ESP_OK) {
         for (int i = 0; i < MAX_SLOTS; i++) {
-            char key_mac, key_nome;
+            char key_mac[16], key_nome[16];
             snprintf(key_mac, sizeof(key_mac), "mac_%d", i);
             snprintf(key_nome, sizeof(key_nome), "nome_%d", i);
 
@@ -74,7 +71,7 @@ static void carregar_config_nvs(void) {
 static void guardar_mac_nvs(int slot_idx, const char *mac) {
     nvs_handle_t h;
     if (nvs_open("shelly_cfg", NVS_READWRITE, &h) == ESP_OK) {
-        char key;
+        char key[16];
         snprintf(key, sizeof(key), "mac_%d", slot_idx);
         nvs_set_str(h, key, mac);
         nvs_commit(h);
@@ -85,7 +82,7 @@ static void guardar_mac_nvs(int slot_idx, const char *mac) {
 static void guardar_nome_nvs(int slot_idx, const char *novo_nome) {
     nvs_handle_t h;
     if (nvs_open("shelly_cfg", NVS_READWRITE, &h) == ESP_OK) {
-        char key;
+        char key[16];
         snprintf(key, sizeof(key), "nome_%d", slot_idx);
         nvs_set_str(h, key, novo_nome);
         nvs_commit(h);
@@ -97,7 +94,7 @@ static void limpar_emparelhamentos_nvs(void) {
     nvs_handle_t h;
     if (nvs_open("shelly_cfg", NVS_READWRITE, &h) == ESP_OK) {
         for (int i = 0; i < MAX_SLOTS; i++) {
-            char key_mac;
+            char key_mac[16];
             snprintf(key_mac, sizeof(key_mac), "mac_%d", i);
             nvs_erase_key(h, key_mac);
         }
@@ -105,7 +102,7 @@ static void limpar_emparelhamentos_nvs(void) {
         nvs_close(h);
     }
     for (int i = 0; i < MAX_SLOTS; i++) {
-        slots[i].mac = '\0';
+        slots[i].mac[0] = '\0';
         slots[i].ativo = false;
         slots[i].temp = NAN;
         slots[i].hum = NAN;
@@ -116,9 +113,11 @@ static void limpar_emparelhamentos_nvs(void) {
 // --- ATUALIZAÇÃO DA UI ---
 static void atualizar_dropdown_divisoes(void) {
     int sel_atual = lv_dropdown_get_selected(dd_slot);
-    char opcoes = "";
+    if (sel_atual < 0 || sel_atual >= MAX_SLOTS) sel_atual = 0;
+
+    char opcoes[256] = "";
     for (int i = 0; i < MAX_SLOTS; i++) {
-        char item;
+        char item[40];
         snprintf(item, sizeof(item), "%d: %s", i + 1, slots[i].nome);
         if (i > 0) strcat(opcoes, "\n");
         strcat(opcoes, item);
@@ -129,11 +128,11 @@ static void atualizar_dropdown_divisoes(void) {
 }
 
 static void atualizar_lista_dropdown_ble(void) {
-    char opcoes = "";
+    char opcoes[512] = "";
     int count = 0;
     for (int i = 0; i < MAX_DESCOBERTOS; i++) {
         if (descobertos[i].valido) {
-            char linha;
+            char linha[40];
             snprintf(linha, sizeof(linha), "%s (%.1f°C)", descobertos[i].mac, descobertos[i].ultima_temp);
             if (count > 0) strcat(opcoes, "\n");
             strcat(opcoes, linha);
@@ -148,7 +147,7 @@ static void atualizar_lista_dropdown_ble(void) {
 }
 
 static void atualizar_cards_dashboard(void) {
-    char buf;
+    char buf[32];
     for (int i = 0; i < MAX_SLOTS; i++) {
         lv_label_set_text(lbl_nome_card[i], slots[i].nome);
         if (!slots[i].ativo) {
@@ -186,7 +185,7 @@ static void processar_pacote_ble(const uint8_t *addr, const uint8_t *data, uint8
             const uint8_t *bt = &data[pos + 4];
             size_t bt_len = field_len - 3;
 
-            if (bt_len < 2 || (bt & 0x01)) return;
+            if (bt_len < 2 || (bt[0] & 0x01)) return;
 
             float temp = NAN, hum = NAN, bat = NAN;
             size_t i = 1;
@@ -209,9 +208,9 @@ static void processar_pacote_ble(const uint8_t *addr, const uint8_t *data, uint8
                 }
             }
 
-            char mac_str;
+            char mac_str[18];
             snprintf(mac_str, sizeof(mac_str), "%02X:%02X:%02X:%02X:%02X:%02X",
-                     addr, addr, addr, addr, addr, addr);
+                     addr[5], addr[4], addr[3], addr[2], addr[1], addr[0]);
 
             bsp_display_lock(0);
 
@@ -286,7 +285,9 @@ static void ir_para_dash(lv_event_t *e) {
 
 static void dd_slot_alterado_cb(lv_event_t *e) {
     int sel = lv_dropdown_get_selected(dd_slot);
-    lv_textarea_set_text(ta_nome_div, slots[sel].nome);
+    if (sel >= 0 && sel < MAX_SLOTS) {
+        lv_textarea_set_text(ta_nome_div, slots[sel].nome);
+    }
 }
 
 static void ta_focado_cb(lv_event_t *e) {
@@ -296,15 +297,15 @@ static void ta_focado_cb(lv_event_t *e) {
 
 static void btn_guardar_nome_cb(lv_event_t *e) {
     lv_obj_add_flag(teclado, LV_OBJ_FLAG_HIDDEN);
-    int slot_idx = lv_dropdown_get_selected(dd_slot);
+int slot_idx = lv_dropdown_get_selected(dd_slot);
 const char *txt = lv_textarea_get_text(ta_nome_div);
-if (strlen(txt) > 0) {
+if (strlen(txt) > 0 && slot_idx >= 0 && slot_idx < MAX_SLOTS) {
 strncpy(slots[slot_idx].nome, txt, sizeof(slots[slot_idx].nome) - 1);
 slots[slot_idx].nome[sizeof(slots[slot_idx].nome) - 1] = '\0';
 guardar_nome_nvs(slot_idx, slots[slot_idx].nome);
 atualizar_dropdown_divisoes();
 atualizar_cards_dashboard();
-char msg;
+char msg[80];
 snprintf(msg, sizeof(msg), "Nome da Divisao %d guardado: %s", slot_idx + 1, slots[slot_idx].nome);
 lv_label_set_text(lbl_status_conf, msg);
 }
@@ -320,16 +321,17 @@ btn_guardar_nome_cb(NULL);
 }
 static void btn_emparelhar_cb(lv_event_t *e) {
 lv_obj_add_flag(teclado, LV_OBJ_FLAG_HIDDEN);
-char sel_str;
+char sel_str[64];
 lv_dropdown_get_selected_str(dd_descobertos, sel_str, sizeof(sel_str));
 if (strncmp(sel_str, "A procurar", 10) == 0) {
 lv_label_set_text(lbl_status_conf, "Nenhum sensor detetado ainda. Prima o botao do Shelly!");
 return;
 }
-char mac_escolhido;
+char mac_escolhido[18];
 strncpy(mac_escolhido, sel_str, 17);
-mac_escolhido = '\0';
+mac_escolhido[17] = '\0';
 int slot_idx = lv_dropdown_get_selected(dd_slot);
+if (slot_idx < 0 || slot_idx >= MAX_SLOTS) slot_idx = 0;
 strcpy(slots[slot_idx].mac, mac_escolhido);
 slots[slot_idx].ativo = true;
 slots[slot_idx].temp = NAN;
@@ -342,7 +344,7 @@ slots[slot_idx].temp = descobertos[d].ultima_temp;
 }
 guardar_mac_nvs(slot_idx, mac_escolhido);
 atualizar_cards_dashboard();
-char msg;
+char msg[80];
 snprintf(msg, sizeof(msg), "Emparelhado %s -> %s!", mac_escolhido, slots[slot_idx].nome);
 lv_label_set_text(lbl_status_conf, msg);
 }
@@ -353,7 +355,11 @@ lv_label_set_text(lbl_status_conf, "Todos os sensores foram desemparelhados.");
 }
 static void limpar_grafico_cb(lv_event_t *e) {
 for (int i = 0; i < MAX_SLOTS; i++) {
+#if LVGL_VERSION_MAJOR >= 9
+lv_chart_set_all_values(grafico_temp, series[i], LV_CHART_POINT_NONE);
+#else
 lv_chart_set_all_value(grafico_temp, series[i], LV_CHART_POINT_NONE);
+#endif
 }
 lv_label_set_text(lbl_status_conf, "Historico limpo com sucesso.");
 }
@@ -419,7 +425,11 @@ lv_obj_set_size(grafico_temp, 760, 385);
 lv_obj_set_pos(grafico_temp, 20, 70);
 lv_chart_set_type(grafico_temp, LV_CHART_TYPE_LINE);
 lv_chart_set_point_count(grafico_temp, 96);
+#if LVGL_VERSION_MAJOR >= 9
+lv_chart_set_axis_range(grafico_temp, LV_CHART_AXIS_PRIMARY_Y, 0, 45);
+#else
 lv_chart_set_range(grafico_temp, LV_CHART_AXIS_PRIMARY_Y, 0, 45);
+#endif
 for (int i = 0; i < MAX_SLOTS; i++) {
 series[i] = lv_chart_add_series(grafico_temp, lv_color_hex(CORES_SLOTS[i]), LV_CHART_AXIS_PRIMARY_Y);
 }
@@ -494,7 +504,7 @@ lv_obj_set_pos(btn_limpar, 290, 300);
 lv_obj_set_style_bg_color(btn_limpar, lv_color_hex(0xDC2626), 0);
 lv_obj_add_event_cb(btn_limpar, limpar_grafico_cb, LV_EVENT_CLICKED, NULL);
 lv_label_set_text(lv_label_create(btn_limpar), "Limpar Historico");
-// Teclado Tátil Virtual (inicia oculto até tocar na caixa de texto)
+// Teclado Tátil Virtual
 teclado = lv_keyboard_create(pag_conf);
 lv_obj_set_size(teclado, 800, 230);
 lv_obj_align(teclado, LV_ALIGN_BOTTOM_MID, 0, 0);
@@ -512,7 +522,7 @@ vTaskDelay(pdMS_TO_TICKS(15 * 60 * 1000));
 bsp_display_lock(0);
 for (int i = 0; i < MAX_SLOTS; i++) {
 if (slots[i].ativo && !isnan(slots[i].temp)) {
-lv_chart_set_next_value(grafico_temp, series[i], (lv_coord_t)slots[i].temp);
+lv_chart_set_next_value(grafico_temp, series[i], (int32_t)slots[i].temp);
 }
 }
 bsp_display_unlock();
