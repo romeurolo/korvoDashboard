@@ -3,8 +3,12 @@
 #include "freertos/task.h"
 #include "nvs_flash.h"
 #include "bsp/esp-bsp.h"
+#include "led_strip.h"
 #include "iot_button.h"
 #include "app_state.h"
+
+#define KORVO_LED_RGB_GPIO 39
+#define KORVO_LED_RGB_NUM 3
 
 SlotSensor slots[MAX_SLOTS];
 SensorDescoberto descobertos[MAX_DESCOBERTOS];
@@ -12,14 +16,26 @@ volatile bool piscar_led_req = false;
 static button_handle_t btns[BSP_BUTTON_NUM];
 
 static void tarefa_led_rgb(void *param) {
-    bool ok = (bsp_led_init() == ESP_OK);
-    if (ok) bsp_led_rgb_set(0, 0, 0);
+    led_strip_handle_t strip = NULL;
+    led_strip_config_t strip_cfg = {
+        .strip_gpio_num = KORVO_LED_RGB_GPIO,
+        .max_leds = KORVO_LED_RGB_NUM,
+    };
+    led_strip_rmt_config_t rmt_cfg = {
+        .resolution_hz = 10 * 1000 * 1000,
+    };
+    bool ok = (led_strip_new_rmt_device(&strip_cfg, &rmt_cfg, &strip) == ESP_OK);
+    if (ok) led_strip_clear(strip);
+
     while (1) {
         if (piscar_led_req && ok) {
             piscar_led_req = false;
-            bsp_led_rgb_set(0, 40, 255); // Azul brilhante
+            for (int i = 0; i < KORVO_LED_RGB_NUM; i++) {
+                led_strip_set_pixel(strip, i, 0, 40, 255); // Azul
+            }
+            led_strip_refresh(strip);
             vTaskDelay(pdMS_TO_TICKS(150));
-            bsp_led_rgb_set(0, 0, 0);
+            led_strip_clear(strip);
         }
         vTaskDelay(pdMS_TO_TICKS(30));
     }
