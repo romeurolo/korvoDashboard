@@ -11,10 +11,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Configurar Target ESP32-S31 e Compilar
+      - name: Restaurar Cache de Compilação (Build + CCache)
+        uses: actions/cache@v4
+        with:
+          path: |
+            build
+            managed_components
+            ~/.ccache
+          key: esp32s31-idf-${{ hashFiles('sdkconfig.defaults', 'main/idf_component.yml', 'CMakeLists.txt') }}-${{ github.run_id }}
+          restore-keys: |
+            esp32s31-idf-${{ hashFiles('sdkconfig.defaults', 'main/idf_component.yml', 'CMakeLists.txt') }}-
+            esp32s31-idf-
+
+      - name: Configurar Target e Compilar (Incremental)
         run: |
           . $IDF_PATH/export.sh
-          idf.py set-target esp32s31 || (cat build/log/idf_py_stderr_output_* && exit 1)
+          export IDF_CCACHE_ENABLE=1
+          if [ ! -f build/build.ninja ]; then
+            idf.py set-target esp32s31 || (cat build/log/idf_py_stderr_output_* && exit 1)
+          fi
           idf.py build || (cat build/log/idf_py_stderr_output_* && exit 1)
           mkdir -p pacote_flash
           cp build/bootloader/bootloader.bin pacote_flash/
