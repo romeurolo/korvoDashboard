@@ -7,7 +7,7 @@
 #include "iot_button.h"
 #include "app_state.h"
 
-#define KORVO_LED_RGB_GPIO 39
+#define KORVO_LED_RGB_GPIO 37
 #define KORVO_LED_RGB_NUM 3
 
 SlotSensor slots[MAX_SLOTS];
