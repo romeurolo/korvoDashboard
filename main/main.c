@@ -173,7 +173,7 @@ static void atualizar_cards_dashboard(void) {
     }
 }
 
-// --- DESCODIFICADOR BTHOME V2 (DESCOBERTA + LEITURA) ---
+// --- DESCODIFICADOR BTHOME V2 COMPLETO (SHELLY H&T GEN3) ---
 static void processar_pacote_ble(const uint8_t *addr, const uint8_t *data, uint8_t len) {
     size_t pos = 0;
     while (pos + 2 < len) {
@@ -181,36 +181,49 @@ static void processar_pacote_ble(const uint8_t *addr, const uint8_t *data, uint8
         if (field_len == 0 || pos + field_len >= len) break;
         uint8_t field_type = data[pos + 1];
 
+        // 0x16 = Service Data 16-bit UUID; 0xD2, 0xFC = 0xFCD2 (BTHome)
         if (field_type == 0x16 && field_len >= 5 && data[pos + 2] == 0xD2 && data[pos + 3] == 0xFC) {
             const uint8_t *bt = &data[pos + 4];
             size_t bt_len = field_len - 3;
 
-            if (bt_len < 2 || (bt[0] & 0x01)) return;
+            if (bt_len < 2 || (bt & 0x01)) return; // Ignora se encriptado
 
             float temp = NAN, hum = NAN, bat = NAN;
-            size_t i = 1;
+            size_t i = 1; // Salta byte 0 (Device Info)
+
             while (i < bt_len) {
                 uint8_t obj_id = bt[i++];
-                if (obj_id == 0x01 && i < bt_len) {
-                    bat = bt[i++];
-                } else if (obj_id == 0x02 && i + 1 < bt_len) {
+                if (obj_id == 0x00 && i < bt_len) { // Packet ID (uint8)
+                    i += 1;
+                } else if (obj_id == 0x01 && i < bt_len) { // Bateria (uint8, %)
+                    bat = (float)bt[i++];
+                } else if (obj_id == 0x02 && i + 1 < bt_len) { // Temperatura (sint16, 0.01 C)
                     int16_t raw = (int16_t)(bt[i] | (bt[i + 1] << 8));
                     temp = raw * 0.01f;
                     i += 2;
-                } else if (obj_id == 0x03 && i + 1 < bt_len) {
+                } else if (obj_id == 0x45 && i + 1 < bt_len) { // Temperatura Shelly Gen3 (sint16, 0.1 C)
+                    int16_t raw = (int16_t)(bt[i] | (bt[i + 1] << 8));
+                    temp = raw * 0.1f;
+                    i += 2;
+                } else if (obj_id == 0x03 && i + 1 < bt_len) { // Humidade (uint16, 0.01 %)
                     uint16_t raw = (uint16_t)(bt[i] | (bt[i + 1] << 8));
                     hum = raw * 0.01f;
                     i += 2;
-                } else if (obj_id == 0x00 && i < bt_len) {
+                } else if (obj_id == 0x2E && i < bt_len) { // Humidade Shelly Gen3 (uint8, 1 %)
+                    hum = (float)bt[i++];
+                } else if (obj_id == 0x3A && i < bt_len) { // Botão (uint8)
                     i += 1;
                 } else {
+                    ESP_LOGW(TAG, "Objeto BTHome desconhecido: 0x%02X no byte %d", obj_id, (int)i);
                     break;
                 }
             }
 
-            char mac_str[18];
+            char mac_str;
             snprintf(mac_str, sizeof(mac_str), "%02X:%02X:%02X:%02X:%02X:%02X",
-                     addr[5], addr[4], addr[3], addr[2], addr[1], addr[0]);
+                     addr, addr, addr, addr, addr, addr);
+
+            ESP_LOGI(TAG, "Shelly [%s] -> Temp: %.1f C | Hum: %.0f %% | Bat: %.0f %%", mac_str, temp, hum, bat);
 
             bsp_display_lock(0);
 
@@ -247,6 +260,7 @@ static void processar_pacote_ble(const uint8_t *addr, const uint8_t *data, uint8
         pos += field_len + 1;
     }
 }
+
 
 // --- EVENTOS NIMBLE ---
 static int ble_gap_event(struct ble_gap_event *event, void *arg) {
