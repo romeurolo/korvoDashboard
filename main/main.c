@@ -12,14 +12,14 @@ volatile bool piscar_led_req = false;
 static button_handle_t btns[BSP_BUTTON_NUM];
 
 static void tarefa_led_rgb(void *param) {
-    bool ok = (bsp_leds_init() == ESP_OK);
-    if (ok) bsp_led_set(BSP_LED_GREEN, false);
+    bool ok = (bsp_led_init() == ESP_OK);
+    if (ok) bsp_led_rgb_set(0, 0, 0);
     while (1) {
         if (piscar_led_req && ok) {
             piscar_led_req = false;
-            bsp_led_set(BSP_LED_GREEN, true);
+            bsp_led_rgb_set(0, 40, 255); // Azul brilhante
             vTaskDelay(pdMS_TO_TICKS(150));
-            bsp_led_set(BSP_LED_GREEN, false);
+            bsp_led_rgb_set(0, 0, 0);
         }
         vTaskDelay(pdMS_TO_TICKS(30));
     }
